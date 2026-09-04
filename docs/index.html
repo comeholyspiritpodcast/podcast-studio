@@ -36,7 +36,7 @@
 
       // Socket.IO must be loaded from whichever origin runs the signalling server.
       (function () {
-        var base = window.__STUDIO_API__ || '';
+        var base = window.__STUDIO_API__ || 'https://come-holy-spirit-podcast-studio.onrender.com/';
         var tag = document.createElement('script');
         tag.src = base + '/socket.io/socket.io.js';
         tag.onload = function () {
