@@ -606,12 +606,12 @@ async function joinParts(jobId, fileIds, outputName, folderId) {
  * Static assets (same-origin hosting) + SPA fallback
  * ------------------------------------------------------------------ */
 
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: IS_PROD ? '1h' : 0 }));
+app.use(express.static(path.join(__dirname, 'docs'), { maxAge: IS_PROD ? '1h' : 0 }));
 app.get('/healthz', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) return next();
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'docs', 'index.html'));
 });
 
 /* ------------------------------------------------------------------ *
