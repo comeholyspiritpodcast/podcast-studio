@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Studio — multitrack podcast recording</title>
+    <meta name="description" content="Record multitrack podcast video locally in the browser and send every track straight to your own Google Drive." />
+    <meta name="color-scheme" content="dark" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="/css/main.css" />
+    <link rel="stylesheet" href="/css/studio.css" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <header id="navbar" class="topbar"></header>
+      <aside id="sidebar" class="sidebar"></aside>
+      <main id="view" class="view" tabindex="-1">
+        <div class="loading">Loading studio…</div>
+      </main>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-root" class="toasts" role="status" aria-live="polite"></div>
+
+    <!--
+      Where the API lives. Leave blank when Express serves this folder itself.
+      On GitHub Pages, set it to the Render/Railway URL:
+        window.__STUDIO_API__ = 'https://api.comeholyspirit.com';
+    -->
+    <script>
+      window.__STUDIO_API__ = '';
+
+      // Socket.IO must be loaded from whichever origin runs the signalling server.
+      (function () {
+        var base = window.__STUDIO_API__ || '';
+        var tag = document.createElement('script');
+        tag.src = base + '/socket.io/socket.io.js';
+        tag.onload = function () {
+          var app = document.createElement('script');
+          app.type = 'module';
+          app.src = 'js/app.js';
+          document.body.appendChild(app);
+        };
+        tag.onerror = function () {
+          document.getElementById('view').innerHTML =
+            '<div class="empty"><h3>The studio server is unreachable</h3>' +
+            '<p>Check that the API at ' + (base || 'this origin') + ' is running.</p></div>';
+        };
+        document.body.appendChild(tag);
+      })();
+    </script>
+  </body>
+</html>
