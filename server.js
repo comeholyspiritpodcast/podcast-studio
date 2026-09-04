@@ -614,6 +614,29 @@ app.get('*', (req, res, next) => {
   res.sendFile(path.join(__dirname, 'docs', 'index.html'));
 });
 
+app.use(express.static(path.join(__dirname, 'docs'), { maxAge: IS_PROD ? '1h' : 0 }));
+app.get('/healthz', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) return next();
+  res.sendFile(path.join(__dirname, 'docs', 'index.html'));
+});
+
+app.get('/api/debug/files', (req, res) => {
+  try {
+    const root = __dirname;
+    const list = (dir) => fs.readdirSync(dir, { withFileTypes: true }).map((d) => (d.isDirectory() ? `${d.name}/` : d.name));
+    res.json({
+      __dirname: root,
+      rootContents: list(root),
+      docsContents: fs.existsSync(path.join(root, 'docs')) ? list(path.join(root, 'docs')) : 'docs/ does not exist',
+      docsIndexExists: fs.existsSync(path.join(root, 'docs', 'index.html'))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ------------------------------------------------------------------ *
  * Socket.IO signalling
  * ------------------------------------------------------------------ */
