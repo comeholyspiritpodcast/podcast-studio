@@ -1,0 +1,5 @@
+node_modules/
+.env
+.owner-token.json
+*.log
+.DS_Store
