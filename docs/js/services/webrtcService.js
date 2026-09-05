@@ -9,7 +9,7 @@
  * 'recording:stop', 'chat', 'error'.
  */
 
-import { RTC_CONFIG, MEDIA_CONSTRAINTS, API_BASE } from '../config.js';
+import { RTC_CONFIG, MEDIA_CONSTRAINTS, MEDIA_CONSTRAINTS_FALLBACK, API_BASE } from '../config.js';
 
 export class WebRTCService extends EventTarget {
   constructor() {
@@ -27,13 +27,35 @@ export class WebRTCService extends EventTarget {
 
   /* ---------------- local media ---------------- */
 
-  async startLocalMedia({ audioDeviceId, videoDeviceId } = {}) {
-    const constraints = {
-      audio: { ...MEDIA_CONSTRAINTS.audio, ...(audioDeviceId ? { deviceId: { exact: audioDeviceId } } : {}) },
-      video: { ...MEDIA_CONSTRAINTS.video, ...(videoDeviceId ? { deviceId: { exact: videoDeviceId } } : {}) }
-    };
+  /**
+   * Requests the camera/mic with the strict echo-cancellation constraints.
+   * Some devices throw OverconstrainedError on the exact{} form, so this
+   * retries once with the relaxed (ideal-only) constraints rather than
+   * failing the whole join over it.
+   */
+  static async rawUserMedia({ audioDeviceId, videoDeviceId } = {}) {
+    const build = (base) => ({
+      audio: { ...base.audio, ...(audioDeviceId ? { deviceId: { exact: audioDeviceId } } : {}) },
+      video: { ...base.video, ...(videoDeviceId ? { deviceId: { exact: videoDeviceId } } : {}) }
+    });
 
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    try {
+      return await navigator.mediaDevices.getUserMedia(build(MEDIA_CONSTRAINTS));
+    } catch (err) {
+      if (err.name !== 'OverconstrainedError' && err.name !== 'NotReadableError') throw err;
+      return navigator.mediaDevices.getUserMedia(build(MEDIA_CONSTRAINTS_FALLBACK));
+    }
+  }
+
+  /** Adopts a stream acquired elsewhere (the pre-join screen), skipping a second permission prompt. */
+  adoptLocalMedia(stream) {
+    this.localStream = stream;
+    this.emit('local', { stream });
+    return stream;
+  }
+
+  async startLocalMedia({ audioDeviceId, videoDeviceId } = {}) {
+    const stream = await WebRTCService.rawUserMedia({ audioDeviceId, videoDeviceId });
 
     if (this.localStream) {
       // Swap tracks in place so live peers are not renegotiated unnecessarily.

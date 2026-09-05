@@ -18,6 +18,7 @@
 import { toast, creator, guestMode } from './config.js';
 import { renderNavbar, renderSidebar } from './components/Navbar.js';
 import { renderProjects } from './components/ProjectManager.js';
+import { renderProjectDetail } from './components/ProjectDetail.js';
 import { renderScheduler, renderSettings } from './components/RoomScheduler.js';
 import { renderStudio, teardownStudio } from './components/StudioRoom.js';
 import { renderEntryPortal } from './components/EntryPortal.js';
@@ -80,6 +81,11 @@ async function route() {
     renderNavbar({ title: 'Settings', status });
     renderSidebar({ route: '/settings', status });
     await renderSettings(view, { status });
+  } else if (path.startsWith('/project/')) {
+    const projectSlug = decodeURIComponent(path.slice('/project/'.length)).replace(/\/+$/, '');
+    renderNavbar({ title: '', status });
+    renderSidebar({ route: '/', status });
+    await renderProjectDetail(view, { slug: projectSlug, status });
   } else {
     renderNavbar({ title: '', status });
     renderSidebar({ route: '/', status });

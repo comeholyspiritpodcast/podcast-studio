@@ -10,7 +10,7 @@
  * asset list below.
  */
 
-import { el, clear, icons, toast, formatClock, formatBytes, UPLOAD, askText, guestMode, creator, uploads } from '../config.js';
+import { el, clear, icons, toast, formatClock, formatBytes, UPLOAD, askText, guestMode, uploads } from '../config.js';
 import { WebRTCService, meterStream } from '../services/webrtcService.js';
 import { RecorderService } from '../services/recorderService.js';
 import { gdrive } from '../services/gdriveService.js';
@@ -34,27 +34,36 @@ export async function renderStudio(view, { slug, status }) {
 
   const isGuest = guestMode.isGuest();
 
-  const displayName = localStorage.getItem('studio.name') || (await askDisplayName());
+  let project = null;
+  try {
+    project = await gdrive.getProject(slug);
+  } catch {
+    /* Ad-hoc room: the folder is created on first upload. */
+  }
+  const wasPreExisting = !!project;
+
+  const roomLabel = (project && project.name) || slug;
+  const preJoin = await showPreJoin(view, { roomLabel, isGuest });
+  if (!preJoin) {
+    window.location.hash = '#/';
+    return;
+  }
+
+  const { displayName, localStream: joinedStream } = preJoin;
+  localStorage.setItem('studio.name', displayName);
+
+  clear(view);
+
   const rtc = new WebRTCService();
   const recorder = new RecorderService();
   const tiles = new Map();
   const stopMeters = [];
 
-  let project = null;
-  const wasPreExisting = await (async () => {
-    try {
-      project = await gdrive.getProject(slug);
-      return true;
-    } catch {
-      return false; // ad-hoc room: no project.json yet
-    }
-  })();
-
   active = { rtc, recorder, stopMeters, timer: 0, beforeUnload: null };
 
   /* ---------- header ---------- */
 
-  const titleEl = el('h1', { text: (project && project.name) || slug });
+  const titleEl = el('h1', { text: roomLabel });
 
   const recPill = el('span', { class: 'rec-pill', style: 'display:none' }, [
     el('span', { class: 'blink' }),
@@ -112,7 +121,9 @@ export async function renderStudio(view, { slug, status }) {
 
   const controlChildren = [micBtn, camBtn];
   // Device pickers are a creator convenience — guests get the simplest
-  // possible controls bar (mute, camera, record).
+  // possible controls bar (mute, camera, record). Device switching mid-room
+  // still requires the picker, since the pre-join screen only sets the
+  // starting choice.
   if (!isGuest) controlChildren.push(audioSelect, videoSelect);
   controlChildren.push(el('div', { class: 'spacer' }), recBtn);
 
@@ -120,21 +131,10 @@ export async function renderStudio(view, { slug, status }) {
 
   view.append(controls, assetsHost);
 
-  /* ---------- local media ---------- */
+  /* ---------- local media (already acquired on the pre-join screen) ---------- */
 
-  let localStream;
-  try {
-    localStream = await rtc.startLocalMedia();
-  } catch {
-    grid.append(
-      el('div', { class: 'empty' }, [
-        el('h3', { text: 'Camera and microphone are blocked' }),
-        el('p', { text: 'Allow access from the icon in your browser’s address bar, then reload this page.' })
-      ])
-    );
-    controls.remove();
-    return;
-  }
+  let localStream = joinedStream;
+  rtc.adoptLocalMedia(localStream);
 
   addTile('self', `${displayName} (you)`, localStream, true);
   if (!isGuest) await populateDevices();
@@ -429,20 +429,118 @@ async function renameRoom(project, slug, titleEl) {
   }
 }
 
-/** Custom name entry, replacing window.prompt(). */
-async function askDisplayName() {
-  const name =
-    (await askText({
-      title: 'What should others see?',
-      description: 'This name shows on your video tile to everyone in the room.',
-      placeholder: 'Your name',
-      defaultValue: creator.isSignedIn() ? 'Host' : 'Guest',
-      confirmLabel: 'Continue'
-    })) || 'Guest';
+/**
+ * Device-check screen shown before anyone — guest or creator — enters the
+ * actual room. Acquires the camera/mic once here and hands the live stream
+ * to the studio, so there's no second permission prompt.
+ *
+ * Resolves { displayName, localStream } or null if the person backs out.
+ */
+async function showPreJoin(view, { roomLabel, isGuest }) {
+  clear(view);
+  document.getElementById('sidebar').style.display = 'none';
 
-  const trimmed = name.trim().slice(0, 40) || 'Guest';
-  localStorage.setItem('studio.name', trimmed);
-  return trimmed;
+  const savedName = localStorage.getItem('studio.name') || '';
+  const nameInput = el('input', { class: 'input', placeholder: 'Your name', value: savedName, maxlength: '40' });
+  const preview = el('video', { autoplay: true, playsinline: true, muted: true });
+  const previewOff = el('div', { class: 'tile-off', style: 'display:none' }, ['Camera off']);
+  const audioSelect = el('select', { class: 'select' });
+  const videoSelect = el('select', { class: 'select' });
+  const joinBtn = el('button', { class: 'btn btn-primary', text: 'Join studio', disabled: true });
+  const headphonesYes = el('button', { class: 'btn btn-sm', text: 'Yes' });
+  const headphonesNo = el('button', { class: 'btn btn-sm btn-primary', text: 'No' });
+  const echoHint = el('p', { class: 'hint', style: 'display:none' });
+
+  let usingHeadphones = false;
+  const setHeadphones = (yes) => {
+    usingHeadphones = yes;
+    headphonesYes.className = `btn btn-sm${yes ? ' btn-primary' : ''}`;
+    headphonesNo.className = `btn btn-sm${!yes ? ' btn-primary' : ''}`;
+    echoHint.style.display = yes ? 'none' : 'block';
+    echoHint.textContent = 'Without headphones, others may hear an echo of their own voice. Consider using earbuds if you have them.';
+  };
+  headphonesYes.addEventListener('click', () => setHeadphones(true));
+  headphonesNo.addEventListener('click', () => setHeadphones(false));
+  setHeadphones(false);
+
+  view.append(
+    el('div', { class: 'entry-portal' }, [
+      el('div', { class: 'prejoin-card' }, [
+        el('div', { class: 'prejoin-preview' }, [preview, previewOff]),
+        el('div', { class: 'prejoin-panel' }, [
+          el('p', { class: 'page-sub', text: `You're about to join ${roomLabel}` }),
+          el('h2', { text: 'Just a sec.' }),
+          el('p', { class: 'page-sub', style: 'margin-bottom:20px', text: "Let's set the stage." }),
+          el('div', { class: 'field' }, [nameInput]),
+          el('div', { class: 'field' }, [
+            el('label', { text: 'Camera' }),
+            videoSelect
+          ]),
+          el('div', { class: 'field' }, [
+            el('label', { text: 'Microphone' }),
+            audioSelect
+          ]),
+          el('div', { class: 'field', style: 'display:flex;align-items:center;justify-content:space-between' }, [
+            el('span', { text: 'I am using headphones' }),
+            el('div', { style: 'display:flex;gap:8px' }, [headphonesNo, headphonesYes])
+          ]),
+          echoHint,
+          joinBtn,
+          isGuest ? null : el('a', { class: 'btn btn-ghost btn-sm', href: '#/', text: 'Cancel', style: 'margin-top:8px;display:block;text-align:center' })
+        ])
+      ])
+    ])
+  );
+
+  let stream = null;
+  const acquire = async (opts = {}) => {
+    try {
+      const next = await WebRTCService.rawUserMedia(opts);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      stream = next;
+      preview.srcObject = stream;
+      previewOff.style.display = 'none';
+      joinBtn.disabled = false;
+    } catch (err) {
+      previewOff.style.display = 'grid';
+      previewOff.textContent = 'Camera/mic blocked';
+      toast(err.message || 'Could not access camera or microphone.', 'error');
+    }
+  };
+
+  await acquire();
+
+  try {
+    const devices = await WebRTCService.listDevices();
+    const fill = (select, list, label) => {
+      clear(select).append(el('option', { value: '', text: `Default ${label}` }));
+      list.forEach((d, i) => select.append(el('option', { value: d.deviceId, text: d.label || `${label} ${i + 1}` })));
+    };
+    fill(audioSelect, devices.audio, 'microphone');
+    fill(videoSelect, devices.video, 'camera');
+  } catch {
+    audioSelect.style.display = 'none';
+    videoSelect.style.display = 'none';
+  }
+
+  audioSelect.addEventListener('change', () => acquire({ audioDeviceId: audioSelect.value, videoDeviceId: videoSelect.value }));
+  videoSelect.addEventListener('change', () => acquire({ audioDeviceId: audioSelect.value, videoDeviceId: videoSelect.value }));
+
+  return new Promise((resolve) => {
+    joinBtn.addEventListener('click', () => {
+      if (!stream) return;
+      const name = nameInput.value.trim().slice(0, 40) || 'Guest';
+      resolve({ displayName: name, localStream: stream, usingHeadphones });
+    });
+
+    const cancelLink = view.querySelector('a[href="#/"]');
+    if (cancelLink) {
+      cancelLink.addEventListener('click', () => {
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        resolve(null);
+      });
+    }
+  });
 }
 
 const initialsOf = (name) =>

@@ -40,18 +40,30 @@ h1, h2, h3, h4,
 .page-head,
 .card-title,
 .studio-head h1,
-.modal h2,
-.brand {
+.modal h2 {
+  font-family: var(--font-body);
+  font-weight: 600;
+}
+
+/* Only the words "Come Holy Spirit" use the script face, per brand spec —
+   everything else in the UI is Lexend. */
+.brand-script,
+.script-name {
   font-family: var(--font-header);
-  font-weight: 400; /* Beth Ellen only ships a single weight */
+  font-weight: 400;
+  font-size: 1.5em;
   letter-spacing: 0.01em;
 }
 
-/* Beth Ellen is a script face — bump size a little wherever it's used for
-   small UI text so it stays legible instead of looking cramped. */
-.page-head { font-size: 28px; }
-.card-title { font-size: 20px; }
-.studio-head h1 { font-size: 24px; }
+.brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 20px;
+  text-decoration: none;
+}
+
+.brand-sans { font-family: var(--font-body); font-weight: 600; font-size: 0.62em; color: var(--muted); }
 
 a { color: inherit; }
 
@@ -90,23 +102,6 @@ a { color: inherit; }
 .loading { color: var(--muted); padding: 40px 4px; }
 
 /* ---------- topbar ---------- */
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 22px;
-  text-decoration: none;
-}
-
-.brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  object-fit: cover;
-  background: conic-gradient(from 200deg, #f0356a, #ff9a3c, #b14bf4, #f0356a);
-  flex: none;
-}
 
 .topbar-title { font-size: 15px; color: var(--muted); font-family: var(--font-body); }
 .topbar-spacer { flex: 1; }
@@ -461,16 +456,14 @@ a { color: inherit; }
 }
 
 .entry-logo {
-  width: 64px;
-  height: 64px;
-  border-radius: 14px;
-  margin: 0 auto 18px;
+  max-width: 280px;
+  width: 100%;
+  height: auto;
+  margin: 0 auto 22px;
   display: block;
-  object-fit: cover;
-  background: conic-gradient(from 200deg, #f0356a, #ff9a3c, #b14bf4, #f0356a);
 }
 
-.entry-title { font-size: 34px; margin: 0 0 8px; }
+.entry-title { font-size: 30px; margin: 0 0 8px; font-weight: 600; }
 .entry-sub { color: var(--muted); margin: 0 0 34px; }
 
 .entry-choices {
@@ -510,3 +503,39 @@ a { color: inherit; }
   color: #8fa3ff;
   font-size: 12.5px;
 }
+
+/* ---------- pre-join device check ---------- */
+
+.prejoin-card {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 28px;
+  width: min(920px, 100%);
+  text-align: left;
+}
+
+@media (max-width: 760px) {
+  .prejoin-card { grid-template-columns: 1fr; }
+}
+
+.prejoin-preview {
+  position: relative;
+  aspect-ratio: 16/10;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #0e0e10;
+  border: 1px solid var(--line);
+}
+
+.prejoin-preview video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+.prejoin-preview .tile-off { position: absolute; inset: 0; }
+
+.prejoin-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 26px;
+}
+
+.prejoin-panel h2 { margin: 4px 0 4px; font-size: 26px; }
+.prejoin-panel .btn-primary { width: 100%; justify-content: center; padding: 13px; }

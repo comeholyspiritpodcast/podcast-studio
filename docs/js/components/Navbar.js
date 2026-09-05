@@ -14,22 +14,12 @@ const NAV = [
 export function renderNavbar({ title, status }) {
   const bar = clear(document.getElementById('navbar'));
 
-  const logo = el('img', {
-    class: 'brand-mark',
-    src: 'images/chsp-logo.png',
-    alt: '',
-    onerror: (e) => {
-      e.target.style.background = 'conic-gradient(from 200deg, #f0356a, #ff9a3c, #b14bf4, #f0356a)';
-      e.target.removeAttribute('src');
-    }
-  });
+  const brand = el('a', { class: 'brand', href: '#/' }, [
+    el('span', { class: 'brand-script', text: 'Come Holy Spirit' }),
+    el('span', { class: 'brand-sans', text: ' Podcast | Studio' })
+  ]);
 
-  bar.append(
-    el('a', { class: 'brand', href: '#/' }, [logo, 'Come Holy Spirit']),
-    el('span', { class: 'topbar-title', text: title || '' }),
-    el('div', { class: 'topbar-spacer' }),
-    uploadIndicator()
-  );
+  bar.append(brand, el('span', { class: 'topbar-title', text: title || '' }), el('div', { class: 'topbar-spacer' }), uploadIndicator());
 
   // Guests never see this bar's creator controls at all — StudioRoom swaps
   // to a stripped-down header in guest mode. This toggle only appears for

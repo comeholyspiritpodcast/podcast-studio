@@ -57,7 +57,7 @@ export async function renderProjects(view, { status }) {
 
 function projectCard(project, view, status) {
   const card = el('div', { class: 'card' });
-  const link = el('a', { href: `#/room/${project.slug}`, style: 'display:contents;color:inherit;text-decoration:none' });
+  const link = el('a', { href: `#/project/${project.slug}`, style: 'display:contents;color:inherit;text-decoration:none' });
 
   const count = project.recordings || 0;
   link.append(
