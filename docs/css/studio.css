@@ -2,6 +2,40 @@
    studio.css — video grid, controls bar, asset manager
    ------------------------------------------------------------------ */
 
+/* ---------- brand header layout ---------- */
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.brand-stacked {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+
+.brand-script {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.brand-sans {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.brand-studio {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
 .studio {
   display: flex;
   flex-direction: column;
@@ -153,7 +187,7 @@
 
 .asset video {
   width: 100%;
-  border-radius: 9px;
+  border-radius: 99px;
   background: #000;
   aspect-ratio: 16 / 9;
 }

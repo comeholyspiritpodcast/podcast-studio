@@ -353,7 +353,8 @@ export async function renderStudio(view, { slug, status }) {
     let tile = tiles.get(id);
 
     if (!tile) {
-      const video = el('video', { autoplay: true, playsinline: true, muted: isSelf ? true : null });
+      const video = el('video', { autoplay: true, playsinline: true });
+      video.muted = Boolean(isSelf);
       const off = el('div', { class: 'tile-off', style: 'display:none', text: initialsOf(name) });
       const nameEl = el('span', { class: 'name', text: name });
       const mutedEl = el('span', { class: 'muted-icon', html: icons.micOff, style: 'display:none;width:15px' });
@@ -370,6 +371,8 @@ export async function renderStudio(view, { slug, status }) {
       tiles.set(id, tile);
     }
 
+    if (isSelf) tile.video.muted = true;
+    
     tile.nameEl.textContent = name;
 
     if (stream && tile.video.srcObject !== stream) {

@@ -1,5 +1,5 @@
 /**
- * Navbar.js — top bar (brand, page title, guest toggle, account) and the
+ * Navbar.js — top bar (brand, guest toggle, account) and the
  * left nav.
  */
 
@@ -11,15 +11,19 @@ const NAV = [
   { route: '/settings', label: 'Settings', icon: icons.settings }
 ];
 
-export function renderNavbar({ title, status }) {
+export function renderNavbar({ status }) {
   const bar = clear(document.getElementById('navbar'));
 
   const brand = el('a', { class: 'brand', href: '#/' }, [
-    el('span', { class: 'brand-script', text: 'Come Holy Spirit' }),
-    el('span', { class: 'brand-sans', text: ' Podcast | Studio' })
+    el('div', { class: 'brand-stacked' }, [
+      el('span', { class: 'brand-script', text: 'Come Holy Spirit' }),
+      el('span', { class: 'brand-sans', text: 'Podcast' })
+    ]),
+    el('span', { class: 'brand-studio', text: '| Studio' })
   ]);
 
-  bar.append(brand, el('span', { class: 'topbar-title', text: title || '' }), el('div', { class: 'topbar-spacer' }), uploadIndicator());
+  // Removed topbar-title element so tab names do not render in the header
+  bar.append(brand, el('div', { class: 'topbar-spacer' }), uploadIndicator());
 
   // Guests never see this bar's creator controls at all — StudioRoom swaps
   // to a stripped-down header in guest mode. This toggle only appears for
