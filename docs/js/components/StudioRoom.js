@@ -4,9 +4,13 @@
  * Video grid with self view and remote guests, active-speaker highlight,
  * per-tile level meters, controls bar, host-synchronised recording, and a
  * live indicator showing how far behind Drive is while the take runs.
+ *
+ * A guest (guestMode.isGuest()) sees a stripped-down version: no device
+ * pickers, no rename, no invite link, no delete/export controls in the
+ * asset list below.
  */
 
-import { el, clear, icons, toast, formatClock, formatBytes, UPLOAD } from '../config.js';
+import { el, clear, icons, toast, formatClock, formatBytes, UPLOAD, askText, guestMode, creator, uploads } from '../config.js';
 import { WebRTCService, meterStream } from '../services/webrtcService.js';
 import { RecorderService } from '../services/recorderService.js';
 import { gdrive } from '../services/gdriveService.js';
@@ -20,6 +24,7 @@ export function teardownStudio() {
   active.stopMeters.forEach((stop) => stop());
   active.rtc.leave();
   clearInterval(active.timer);
+  window.removeEventListener('beforeunload', active.beforeUnload);
   active = null;
 }
 
@@ -27,22 +32,29 @@ export async function renderStudio(view, { slug, status }) {
   clear(view);
   teardownStudio();
 
-  const displayName = localStorage.getItem('studio.name') || promptForName();
+  const isGuest = guestMode.isGuest();
+
+  const displayName = localStorage.getItem('studio.name') || (await askDisplayName());
   const rtc = new WebRTCService();
   const recorder = new RecorderService();
   const tiles = new Map();
   const stopMeters = [];
 
   let project = null;
-  try {
-    project = await gdrive.getProject(slug);
-  } catch {
-    /* Ad-hoc room: the folder is created on first upload. */
-  }
+  const wasPreExisting = await (async () => {
+    try {
+      project = await gdrive.getProject(slug);
+      return true;
+    } catch {
+      return false; // ad-hoc room: no project.json yet
+    }
+  })();
 
-  active = { rtc, recorder, stopMeters, timer: 0 };
+  active = { rtc, recorder, stopMeters, timer: 0, beforeUnload: null };
 
   /* ---------- header ---------- */
+
+  const titleEl = el('h1', { text: (project && project.name) || slug });
 
   const recPill = el('span', { class: 'rec-pill', style: 'display:none' }, [
     el('span', { class: 'blink' }),
@@ -54,17 +66,35 @@ export async function renderStudio(view, { slug, status }) {
     el('span', { class: 'cloud-text', text: 'Uploading live' })
   ]);
 
+  const headerButtons = [];
+
+  if (isGuest) {
+    headerButtons.push(el('span', { class: 'guest-badge' }, [el('span', { html: icons.guest, style: 'width:13px;display:inline-flex' }), 'Guest']));
+  } else {
+    if (wasPreExisting) {
+      headerButtons.push(
+        el('button', {
+          class: 'btn btn-sm',
+          html: icons.edit,
+          title: 'Rename room',
+          onclick: () => renameRoom(project, slug, titleEl)
+        })
+      );
+    }
+    headerButtons.push(
+      el('button', { class: 'btn btn-sm', html: icons.link, title: 'Copy invite link', onclick: () => copyInvite(slug) })
+    );
+  }
+
+  headerButtons.push(el('a', { class: 'btn btn-sm btn-ghost', href: '#/', html: icons.leave, title: 'Leave room' }));
+
   view.append(
     el('div', { class: 'studio-head' }, [
-      el('div', {}, [
-        el('h1', { text: (project && project.name) || slug }),
-        el('p', { class: 'page-sub', text: `/room/${slug}` })
-      ]),
+      el('div', {}, [titleEl, el('p', { class: 'page-sub', text: `/room/${slug}` })]),
       recPill,
       cloudPill,
       el('div', { style: 'flex:1' }),
-      el('button', { class: 'btn btn-sm', html: icons.link, title: 'Copy invite link', onclick: () => copyInvite(slug) }),
-      el('a', { class: 'btn btn-sm btn-ghost', href: '#/', html: icons.leave, title: 'Leave room' })
+      ...headerButtons
     ])
   );
 
@@ -80,11 +110,13 @@ export async function renderStudio(view, { slug, status }) {
   const audioSelect = el('select', { class: 'select', 'aria-label': 'Microphone' });
   const videoSelect = el('select', { class: 'select', 'aria-label': 'Camera' });
 
-  const controls = el('div', { class: 'controls' }, [
-    micBtn, camBtn, audioSelect, videoSelect,
-    el('div', { class: 'spacer' }),
-    recBtn
-  ]);
+  const controlChildren = [micBtn, camBtn];
+  // Device pickers are a creator convenience — guests get the simplest
+  // possible controls bar (mute, camera, record).
+  if (!isGuest) controlChildren.push(audioSelect, videoSelect);
+  controlChildren.push(el('div', { class: 'spacer' }), recBtn);
+
+  const controls = el('div', { class: 'controls' }, controlChildren);
 
   view.append(controls, assetsHost);
 
@@ -105,7 +137,7 @@ export async function renderStudio(view, { slug, status }) {
   }
 
   addTile('self', `${displayName} (you)`, localStream, true);
-  await populateDevices();
+  if (!isGuest) await populateDevices();
 
   /* ---------- signalling ---------- */
 
@@ -132,15 +164,17 @@ export async function renderStudio(view, { slug, status }) {
   rtc.addEventListener('recording:start', ({ detail }) => beginRecording(detail.sessionId, false));
   rtc.addEventListener('recording:stop', () => endRecording(false));
 
-  /* ---------- upload feedback ---------- */
+  /* ---------- upload feedback (per-room pill + dashboard-wide bus) ---------- */
 
-  recorder.addEventListener('upload-progress', () => {
+  recorder.addEventListener('upload-progress', ({ detail }) => {
     const backlog = recorder.backlog();
-    const text = backlog > UPLOAD.warnBacklogBytes
-      ? `Drive is ${formatBytes(backlog)} behind`
-      : 'Uploading live to Drive';
+    const text = backlog > UPLOAD.warnBacklogBytes ? `Drive is ${formatBytes(backlog)} behind` : 'Uploading live to Drive';
     cloudPill.querySelector('.cloud-text').textContent = text;
     cloudPill.classList.toggle('lagging', backlog > UPLOAD.warnBacklogBytes);
+
+    const id = `${detail.track}`;
+    uploads.start(id, `${displayName} — ${detail.track}`);
+    uploads.progress(id, detail.percent || 0);
   });
 
   recorder.addEventListener('upload-error', ({ detail }) => {
@@ -150,8 +184,10 @@ export async function renderStudio(view, { slug, status }) {
   });
 
   recorder.addEventListener('uploaded', ({ detail }) => {
+    uploads.finish(detail.take.track);
     toast(`${detail.take.filename} is in Drive`, 'success');
     refreshAssets();
+    if (!wasPreExisting) transformToRecordedFolder();
   });
 
   /* ---------- control wiring ---------- */
@@ -208,16 +244,22 @@ export async function renderStudio(view, { slug, status }) {
     }
   });
 
-  window.addEventListener('beforeunload', (e) => {
+  // Browsers no longer show custom beforeunload text (a security measure
+  // against fake "are you sure" phishing), but returnValue still triggers
+  // the native confirmation dialog itself — which is the actual protection
+  // being asked for here. The specific wording is set for browsers that
+  // still honour it, and documented in case someone checks the source.
+  active.beforeUnload = (e) => {
     if (recorder.recording || recorder.backlog() > 0) {
       e.preventDefault();
-      e.returnValue = '';
+      e.returnValue = 'Leaving the recording room will end your side of the recording.';
+      return e.returnValue;
     }
-  });
+  };
+  window.addEventListener('beforeunload', active.beforeUnload);
 
   /* ---------- recording ---------- */
 
-  // One session folder per room per day, so a rejoin lands beside part 1.
   const sessionName = `${slug}-${new Date().toISOString().slice(0, 10)}`;
 
   async function beginRecording(sessionId, local) {
@@ -265,9 +307,7 @@ export async function renderStudio(view, { slug, status }) {
     if (takes.length) {
       const behind = recorder.backlog();
       toast(
-        behind > 1024 * 1024
-          ? `Take saved — ${formatBytes(behind)} left to upload`
-          : 'Take saved — upload finishing now',
+        behind > 1024 * 1024 ? `Take saved — ${formatBytes(behind)} left to upload` : 'Take saved — upload finishing now',
         'success'
       );
       refreshAssets();
@@ -280,7 +320,31 @@ export async function renderStudio(view, { slug, status }) {
   }
 
   function refreshAssets() {
-    renderAssets(assetsHost, { recorder, project, slug, sessionName, status });
+    renderAssets(assetsHost, { recorder, project, slug, sessionName, status, isGuest });
+  }
+
+  /**
+   * A room that was never explicitly saved as a project before recording
+   * (an ad-hoc /room/whatever link) becomes a "Recorded Folder" once it has
+   * a finished take: the live studio chrome collapses to a compact preview
+   * plus the file list, since there's nothing left to record toward unless
+   * someone re-enters and starts again.
+   */
+  let folderified = false;
+  function transformToRecordedFolder() {
+    if (folderified || isGuest) return;
+    folderified = true;
+
+    grid.classList.add('folderified');
+    for (const [, tile] of tiles) tile.node.classList.add('compact');
+
+    if (!view.querySelector('.folder-banner')) {
+      const banner = el('div', { class: 'folder-banner' }, [
+        el('span', { html: icons.folder, style: 'width:16px;display:inline-flex' }),
+        `This room is now a recorded folder — start recording again any time, or find it later in your library.`
+      ]);
+      view.insertBefore(banner, grid);
+    }
   }
 
   /* ---------- tiles ---------- */
@@ -345,10 +409,40 @@ export async function renderStudio(view, { slug, status }) {
   }
 }
 
-function promptForName() {
-  const name = (window.prompt('What name should the others see?', 'Guest') || 'Guest').trim().slice(0, 40);
-  localStorage.setItem('studio.name', name);
-  return name;
+async function renameRoom(project, slug, titleEl) {
+  const name = await askText({
+    title: 'Rename room',
+    description: 'This is a shortcut for the full rename dialog in your library — room address and code stay the same here.',
+    placeholder: 'Room name',
+    defaultValue: (project && project.name) || slug,
+    confirmLabel: 'Save'
+  });
+  if (!name || !project) return;
+
+  try {
+    await gdrive.updateProject(slug, project.folderId, { name });
+    titleEl.textContent = name;
+    project.name = name;
+    toast('Room renamed', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+/** Custom name entry, replacing window.prompt(). */
+async function askDisplayName() {
+  const name =
+    (await askText({
+      title: 'What should others see?',
+      description: 'This name shows on your video tile to everyone in the room.',
+      placeholder: 'Your name',
+      defaultValue: creator.isSignedIn() ? 'Host' : 'Guest',
+      confirmLabel: 'Continue'
+    })) || 'Guest';
+
+  const trimmed = name.trim().slice(0, 40) || 'Guest';
+  localStorage.setItem('studio.name', trimmed);
+  return trimmed;
 }
 
 const initialsOf = (name) =>

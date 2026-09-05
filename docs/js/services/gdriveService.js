@@ -24,6 +24,15 @@ export const gdrive = {
     return api(ENDPOINTS.projects);
   },
 
+  creatorLogin(code) {
+    return api(ENDPOINTS.creatorLogin, { method: 'POST', body: JSON.stringify({ code }) });
+  },
+
+  /** Guest-facing: resolves a room code to the project it belongs to. */
+  resolveRoomCode(code) {
+    return api(`/api/rooms/${encodeURIComponent(code.trim().toUpperCase())}`);
+  },
+
   createProject({ name, slug, description }) {
     return api(ENDPOINTS.projects, { method: 'POST', body: JSON.stringify({ name, slug, description }) });
   },
@@ -32,8 +41,43 @@ export const gdrive = {
     return api(ENDPOINTS.project(slug));
   },
 
+  /** Renames a project and/or regenerates its room code. */
+  updateProject(slug, folderId, patch) {
+    return api(ENDPOINTS.project(slug), { method: 'PATCH', body: JSON.stringify({ folderId, ...patch }) });
+  },
+
+  /** Trashes a project folder in Drive (recoverable for 30 days). */
+  deleteProject(slug, folderId) {
+    return api(`${ENDPOINTS.deleteProject(slug)}?folderId=${encodeURIComponent(folderId)}`, { method: 'DELETE' });
+  },
+
+  /** Trashes a single recording in Drive. */
+  deleteRecording(fileId) {
+    return api(ENDPOINTS.deleteRecording(fileId), { method: 'DELETE' });
+  },
+
   listRecordings(slug, folderId) {
     return api(ENDPOINTS.recordings(slug, folderId));
+  },
+
+  /**
+   * Converts recordings to MP4/MP3 on the server. Off unless
+   * ENABLE_SERVER_EXPORT is set — see server.js for why.
+   */
+  async exportFiles({ fileIds, format, folderId }, onProgress = () => {}) {
+    const { jobId } = await api(ENDPOINTS.exportStart, {
+      method: 'POST',
+      body: JSON.stringify({ fileIds, format, folderId })
+    });
+
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const job = await api(ENDPOINTS.exportStatus(jobId));
+
+      if (job.state === 'running') onProgress(job.progress || 0);
+      if (job.state === 'done') return job.files;
+      if (job.state === 'failed') throw new Error(job.error || 'Exporting failed.');
+    }
   },
 
   /**

@@ -16,6 +16,8 @@
   --radius-sm: 8px;
   --sidebar-w: 248px;
   --topbar-h: 60px;
+  --font-header: 'Beth Ellen', cursive;
+  --font-body: 'Lexend', sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -28,11 +30,28 @@ html, body {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-body);
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
+
+h1, h2, h3, h4,
+.page-head,
+.card-title,
+.studio-head h1,
+.modal h2,
+.brand {
+  font-family: var(--font-header);
+  font-weight: 400; /* Beth Ellen only ships a single weight */
+  letter-spacing: 0.01em;
+}
+
+/* Beth Ellen is a script face — bump size a little wherever it's used for
+   small UI text so it stays legible instead of looking cramped. */
+.page-head { font-size: 28px; }
+.card-title { font-size: 20px; }
+.studio-head h1 { font-size: 24px; }
 
 a { color: inherit; }
 
@@ -76,21 +95,38 @@ a { color: inherit; }
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 700;
-  font-size: 17px;
-  letter-spacing: -0.01em;
+  font-size: 22px;
   text-decoration: none;
 }
 
 .brand-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: cover;
   background: conic-gradient(from 200deg, #f0356a, #ff9a3c, #b14bf4, #f0356a);
+  flex: none;
 }
 
-.topbar-title { font-size: 15px; color: var(--muted); }
+.topbar-title { font-size: 15px; color: var(--muted); font-family: var(--font-body); }
 .topbar-spacer { flex: 1; }
+
+.guest-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.guest-toggle:hover { color: var(--text); background: var(--surface); }
+.guest-toggle svg { width: 15px; }
 
 .avatar {
   width: 34px;
@@ -345,4 +381,132 @@ a { color: inherit; }
   .sidebar-foot { display: none; }
   .view { padding: 20px 16px 50px; }
   .topbar-title { display: none; }
+}
+
+/* ---------- upload indicator (navbar) ---------- */
+
+.upload-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(55, 201, 139, .1);
+  color: var(--good);
+  font-size: 13px;
+  margin-right: 10px;
+}
+
+/* ---------- danger modal (typed confirmation) ---------- */
+
+.modal-danger h2 { color: #ff6b8f; }
+.modal-danger .hint strong { color: var(--text); font-family: var(--font-body); }
+
+.btn-danger-outline {
+  background: transparent;
+  border-color: #5d2233;
+  color: #ff90ae;
+}
+.btn-danger-outline:hover { background: rgba(240, 53, 106, .1); }
+
+/* ---------- dropdown menu (export options) ---------- */
+
+.dropdown { position: relative; display: inline-block; }
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  background: var(--surface-hi);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px;
+  z-index: 40;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .4);
+}
+
+.dropdown-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.dropdown-menu button:hover { background: var(--surface); }
+.dropdown-menu button svg { width: 15px; flex: none; }
+.dropdown-menu .hint { padding: 8px 11px 4px; margin: 0; }
+
+/* ---------- entry portal ---------- */
+
+.entry-portal {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.entry-card {
+  width: min(720px, 100%);
+  text-align: center;
+}
+
+.entry-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  margin: 0 auto 18px;
+  display: block;
+  object-fit: cover;
+  background: conic-gradient(from 200deg, #f0356a, #ff9a3c, #b14bf4, #f0356a);
+}
+
+.entry-title { font-size: 34px; margin: 0 0 8px; }
+.entry-sub { color: var(--muted); margin: 0 0 34px; }
+
+.entry-choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 620px) {
+  .entry-choices { grid-template-columns: 1fr; }
+}
+
+.entry-choice {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 28px 22px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.entry-choice:hover { border-color: #3a3a40; }
+.entry-choice svg { width: 26px; margin-bottom: 14px; color: var(--muted); }
+.entry-choice h3 { margin: 0 0 6px; font-size: 19px; }
+.entry-choice p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+
+/* ---------- guest-simplified room ---------- */
+
+.guest-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(111, 140, 255, .12);
+  color: #8fa3ff;
+  font-size: 12.5px;
 }

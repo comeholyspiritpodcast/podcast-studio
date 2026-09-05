@@ -31,6 +31,22 @@ const ADMIN_KEY = process.env.ADMIN_KEY || '';
 const JOIN_ENABLED = process.env.ENABLE_SERVER_JOIN === 'true';
 const JOIN_MAX_BYTES = Number(process.env.JOIN_MAX_BYTES || 2 * 1024 * 1024 * 1024);
 const EGRESS_BUDGET_BYTES = Number(process.env.EGRESS_BUDGET_BYTES || 5 * 1024 * 1024 * 1024);
+
+/**
+ * Exporting to MP4/MP3 re-encodes on the server, which (like joining) pulls
+ * the whole file down from Drive and pushes a converted copy back up — the
+ * same bandwidth cost as Join parts. Off by default for the same reason.
+ */
+const EXPORT_ENABLED = process.env.ENABLE_SERVER_EXPORT === 'true';
+
+/**
+ * Lightweight creator gate. This is NOT per-person Google login — it's one
+ * shared passphrase that marks a browser as "the Creator," distinct from
+ * guests who only ever enter a room code. Real per-person OAuth (letting
+ * multiple named creators sign in individually) is a bigger project-level
+ * change and isn't implemented here.
+ */
+const CREATOR_ACCESS_CODE = process.env.CREATOR_ACCESS_CODE || '';
 const TOKEN_PATH = process.env.TOKEN_PATH || path.join(__dirname, '.owner-token.json');
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -178,12 +194,28 @@ You can close this tab.</pre>`
   }
 });
 
+/**
+ * Creator sign-in: checks a shared passphrase and returns ok. The frontend
+ * stores this client-side; every other route trusts it implicitly, matching
+ * the "one Drive, no real per-user auth" model already in place. Set
+ * CREATOR_ACCESS_CODE to enable; if unset, the creator gate is effectively
+ * disabled (anyone can act as creator) — fine for a single trusted host,
+ * not for a public multi-creator deployment.
+ */
+app.post('/api/creator/login', (req, res) => {
+  if (!CREATOR_ACCESS_CODE) return res.json({ ok: true, gated: false });
+  const code = String((req.body && req.body.code) || '');
+  if (code !== CREATOR_ACCESS_CODE) return res.status(401).json({ ok: false, error: 'wrong_code' });
+  res.json({ ok: true, gated: true });
+});
+
 app.get('/api/status', async (req, res) => {
+  const base = { joinEnabled: JOIN_ENABLED, exportEnabled: EXPORT_ENABLED, creatorGateEnabled: !!CREATOR_ACCESS_CODE };
   try {
     await ownerAccessToken();
-    res.json({ linked: true, joinEnabled: JOIN_ENABLED });
+    res.json({ ...base, linked: true });
   } catch (err) {
-    res.json({ linked: false, message: err.message });
+    res.json({ ...base, linked: false, message: err.message });
   }
 });
 
@@ -245,6 +277,14 @@ async function writeProjectMeta(drive, folderId, meta) {
     });
   }
   return meta;
+}
+
+/** Short, easy-to-read code guests type in to join — distinct from the slug. */
+function generateRoomCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I ambiguity
+  let code = '';
+  for (let i = 0; i < 6; i += 1) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return code;
 }
 
 async function readProjectMeta(drive, folderId) {
@@ -311,11 +351,88 @@ app.post('/api/projects', async (req, res) => {
       folderId,
       name,
       slug: slugify(req.body.slug || name),
+      roomCode: generateRoomCode(),
       description: String(req.body.description || ''),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      adHoc: false
     });
 
     res.status(201).json(Object.assign({ recordings: 0 }, meta));
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/**
+ * Renames a project and/or its room code. Renaming the slug changes the
+ * shareable studio link immediately — old links to the previous slug stop
+ * resolving, so the UI warns before submitting this.
+ */
+app.patch('/api/projects/:slug', async (req, res) => {
+  try {
+    const drive = ownerDrive();
+    const folderId = String(req.body.folderId || '');
+    if (!folderId) return res.status(400).json({ error: 'folderId_required' });
+
+    const current = (await readProjectMeta(drive, folderId)) || {};
+    const next = Object.assign({}, current, {
+      id: folderId,
+      folderId,
+      name: req.body.name ? String(req.body.name).trim() : current.name,
+      slug: req.body.slug ? slugify(req.body.slug) : current.slug,
+      roomCode: req.body.regenerateCode ? generateRoomCode() : current.roomCode || generateRoomCode(),
+      description: req.body.description !== undefined ? String(req.body.description) : current.description
+    });
+
+    if (next.name && next.name !== current.name) {
+      await drive.files.update({ fileId: folderId, requestBody: { name: next.name } });
+    }
+
+    await writeProjectMeta(drive, folderId, next);
+    res.json(next);
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/**
+ * Trashes a project folder (Drive Trash, not permanent — recoverable for 30
+ * days from drive.google.com). Requires the folder id as a light safeguard
+ * against deleting by slug alone.
+ */
+app.delete('/api/projects/:slug', async (req, res) => {
+  try {
+    const drive = ownerDrive();
+    const folderId = String(req.query.folderId || req.body.folderId || '');
+    if (!folderId) return res.status(400).json({ error: 'folderId_required' });
+
+    await drive.files.update({ fileId: folderId, requestBody: { trashed: true } });
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/** Guest-facing lookup: room code -> project. Guests never see folder IDs directly. */
+app.get('/api/rooms/:code', async (req, res) => {
+  try {
+    const drive = ownerDrive();
+    const root = await rootFolder(drive);
+    const list = await drive.files.list({
+      q: `'${esc(root)}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`,
+      fields: 'files(id,name)',
+      pageSize: 200
+    });
+
+    const code = String(req.params.code || '').trim().toUpperCase();
+
+    for (const folder of list.data.files) {
+      const meta = await readProjectMeta(drive, folder.id);
+      if (meta && String(meta.roomCode || '').toUpperCase() === code) {
+        return res.json(Object.assign({ name: folder.name }, meta, { folderId: folder.id }));
+      }
+    }
+    res.status(404).json({ error: 'not_found', message: 'No room matches that code.' });
   } catch (err) {
     fail(res, err);
   }
@@ -364,6 +481,17 @@ app.get('/api/projects/:slug/recordings', async (req, res) => {
   }
 });
 
+/** Trashes a single recording (Drive Trash, recoverable). */
+app.delete('/api/recordings/:fileId', async (req, res) => {
+  try {
+    const drive = ownerDrive();
+    await drive.files.update({ fileId: String(req.params.fileId), requestBody: { trashed: true } });
+    res.json({ ok: true });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
 /* ------------------------------------------------------------------ *
  * Resumable upload sessions
  *
@@ -382,6 +510,23 @@ app.post('/api/uploads/session', async (req, res) => {
     const root = await rootFolder(drive);
     const projectFolder = await findOrCreateFolder(drive, String(projectName || projectSlug || 'Untitled'), root);
     const parent = sessionName ? await findOrCreateFolder(drive, String(sessionName), projectFolder) : projectFolder;
+
+    // Ad-hoc room (recorded before it was ever explicitly saved as a
+    // project): give it real metadata on first upload so it shows up in the
+    // dashboard as a proper "Recorded Folder" instead of a bare Drive folder.
+    const existingMeta = await readProjectMeta(drive, projectFolder);
+    if (!existingMeta) {
+      await writeProjectMeta(drive, projectFolder, {
+        id: projectFolder,
+        folderId: projectFolder,
+        name: String(projectName || projectSlug || 'Untitled'),
+        slug: slugify(projectSlug || projectName || 'untitled'),
+        roomCode: generateRoomCode(),
+        description: '',
+        createdAt: new Date().toISOString(),
+        adHoc: true
+      });
+    }
 
     const metadata = {
       name: String(filename),
@@ -550,6 +695,115 @@ app.get('/api/join/:jobId', (req, res) => {
   res.json(job);
 });
 
+/* ------------------------------------------------------------------ *
+ * Export to MP4 / MP3
+ *
+ * Same shape and same bandwidth trade-off as Join parts: the file is
+ * pulled from Drive, transcoded with ffmpeg, and the result pushed back up.
+ * Off by default (ENABLE_SERVER_EXPORT) for the same free-tier reason.
+ * ------------------------------------------------------------------ */
+
+app.post('/api/export', async (req, res) => {
+  try {
+    if (!EXPORT_ENABLED) {
+      return res.status(503).json({
+        error: 'export_disabled',
+        message:
+          'Server-side export is off, because converting a file moves it through this host twice. The WebM original already plays in every modern editor and most players — set ENABLE_SERVER_EXPORT=true to turn this on.'
+      });
+    }
+
+    const fileIds = Array.isArray(req.body.fileIds) ? req.body.fileIds.map(String) : [];
+    const format = req.body.format === 'mp3' ? 'mp3' : 'mp4';
+    if (!fileIds.length) return res.status(400).json({ error: 'need_file_ids' });
+
+    if (!(await ffmpegAvailable())) {
+      return res.status(501).json({ error: 'ffmpeg_missing', message: 'ffmpeg is not available on this server.' });
+    }
+
+    const drive = ownerDrive();
+    let totalBytes = 0;
+    for (const id of fileIds) {
+      const meta = await drive.files.get({ fileId: id, fields: 'size' });
+      totalBytes += Number(meta.data.size || 0);
+    }
+    const cost = totalBytes * 2;
+
+    if (cost > remainingBudget()) {
+      return res.status(507).json({
+        error: 'budget_exceeded',
+        message: `This export would use about ${(cost / 1e9).toFixed(1)} GB and only ${(remainingBudget() / 1e9).toFixed(1)} GB of budget is left.`
+      });
+    }
+
+    const jobId = `export-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    jobs.set(jobId, { state: 'running', progress: 0 });
+    res.status(202).json({ jobId });
+
+    egress.bytes += cost;
+    exportFiles(jobId, fileIds, format, String(req.body.folderId || '')).catch((err) =>
+      jobs.set(jobId, { state: 'failed', error: err.message })
+    );
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+app.get('/api/export/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'unknown_job' });
+  res.json(job);
+});
+
+async function exportFiles(jobId, fileIds, format, folderId) {
+  const drive = ownerDrive();
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'export-'));
+  const outputs = [];
+
+  try {
+    for (let i = 0; i < fileIds.length; i += 1) {
+      const meta = await drive.files.get({ fileId: fileIds[i], fields: 'name' });
+      const srcName = meta.data.name || `track-${i}`;
+      const srcPath = path.join(work, `src-${i}.webm`);
+      const stream = await drive.files.get({ fileId: fileIds[i], alt: 'media' }, { responseType: 'stream' });
+
+      await new Promise((resolve, reject) => {
+        const out = fs.createWriteStream(srcPath);
+        stream.data.pipe(out).on('finish', resolve).on('error', reject);
+      });
+
+      const outName = srcName.replace(/\.webm$/i, '') + (format === 'mp3' ? '.mp3' : '.mp4');
+      const outPath = path.join(work, outName.replace(/[^\w.-]/g, '_'));
+
+      const args =
+        format === 'mp3'
+          ? ['-y', '-i', srcPath, '-vn', '-acodec', 'libmp3lame', '-q:a', '2', outPath]
+          : ['-y', '-i', srcPath, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', outPath];
+
+      await new Promise((resolve, reject) => {
+        const proc = spawn(ffmpegPath(), args);
+        let stderr = '';
+        proc.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000); });
+        proc.on('error', reject);
+        proc.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-400)}`))));
+      });
+
+      const created = await drive.files.create({
+        requestBody: { name: outName, parents: folderId ? [folderId] : undefined },
+        media: { mimeType: format === 'mp3' ? 'audio/mpeg' : 'video/mp4', body: fs.createReadStream(outPath) },
+        fields: 'id,name,size,webViewLink,webContentLink'
+      });
+
+      outputs.push(created.data);
+      jobs.set(jobId, { state: 'running', progress: Math.round(((i + 1) / fileIds.length) * 100) });
+    }
+
+    jobs.set(jobId, { state: 'done', progress: 100, files: outputs });
+  } finally {
+    fs.rm(work, { recursive: true, force: true }, () => {});
+  }
+}
+
 async function joinParts(jobId, fileIds, outputName, folderId) {
   const drive = ownerDrive();
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'join-'));
@@ -612,29 +866,6 @@ app.get('/healthz', (req, res) => res.json({ ok: true, uptime: process.uptime() 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) return next();
   res.sendFile(path.join(__dirname, 'docs', 'index.html'));
-});
-
-app.use(express.static(path.join(__dirname, 'docs'), { maxAge: IS_PROD ? '1h' : 0 }));
-app.get('/healthz', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
-
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) return next();
-  res.sendFile(path.join(__dirname, 'docs', 'index.html'));
-});
-
-app.get('/api/debug/files', (req, res) => {
-  try {
-    const root = __dirname;
-    const list = (dir) => fs.readdirSync(dir, { withFileTypes: true }).map((d) => (d.isDirectory() ? `${d.name}/` : d.name));
-    res.json({
-      __dirname: root,
-      rootContents: list(root),
-      docsContents: fs.existsSync(path.join(root, 'docs')) ? list(path.join(root, 'docs')) : 'docs/ does not exist',
-      docsIndexExists: fs.existsSync(path.join(root, 'docs', 'index.html'))
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 /* ------------------------------------------------------------------ *

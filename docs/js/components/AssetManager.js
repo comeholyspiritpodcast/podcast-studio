@@ -5,34 +5,45 @@
  * With live upload on, a take is usually already in Drive by the time it
  * appears here; the row shows the tail finishing rather than a fresh upload.
  * Downloads link straight to Google's CDN rather than proxying through the
- * API server.
+ * API server. Guests only ever see the preview and their own download
+ * button — no delete, export, or join controls.
  */
 
-import { el, clear, icons, toast, formatBytes, formatClock } from '../config.js';
+import { el, clear, icons, toast, formatBytes, formatClock, askDangerConfirm } from '../config.js';
 import { gdrive } from '../services/gdriveService.js';
 
 export function renderAssets(host, ctx) {
   clear(host);
 
-  const { recorder } = ctx;
+  const { recorder, isGuest } = ctx;
   if (!recorder.takes.length) return;
 
-  host.append(
-    el('div', { class: 'studio-head', style: 'margin-top:8px' }, [
-      el('h1', { text: 'This session’s takes' }),
-      el('div', { style: 'flex:1' }),
-      el('button', {
-        class: 'btn btn-sm',
-        html: icons.download,
-        title: 'Save every take to this computer',
-        onclick: () => recorder.downloadAll()
-      }),
+  const headerActions = [
+    el('button', {
+      class: 'btn btn-sm',
+      html: icons.download,
+      title: 'Save every take to this computer',
+      onclick: () => recorder.downloadAll()
+    })
+  ];
+
+  if (!isGuest) {
+    headerActions.push(
       el('button', {
         class: 'btn btn-sm',
         html: icons.merge,
         title: 'Join parts recorded across a drop-out',
         onclick: () => joinDialog(host, ctx)
-      })
+      }),
+      exportDropdown(ctx)
+    );
+  }
+
+  host.append(
+    el('div', { class: 'studio-head', style: 'margin-top:8px' }, [
+      el('h1', { text: 'This session’s takes' }),
+      el('div', { style: 'flex:1' }),
+      ...headerActions
     ])
   );
 
@@ -123,19 +134,117 @@ function assetRow(take, ctx, host) {
     take.uploader.addEventListener('error', paint);
   }
 
+  if (ctx.isGuest) {
+    // Guests can preview and download their own take, nothing more.
+    return el('div', { class: 'asset' }, [preview, meta, actions]);
+  }
+
   actions.append(
     el('button', {
       class: 'btn btn-sm btn-ghost',
-      text: 'Discard local copy',
-      onclick: () => {
-        if (!take.uploaded && !window.confirm('This take is not confirmed in Drive yet. Discard the local copy?')) return;
+      text: 'Remove from this tab',
+      onclick: async () => {
+        if (!take.uploaded) {
+          const ok = await askDangerConfirm({
+            title: 'Remove this take?',
+            description: 'It has not finished uploading to Drive yet — removing it now loses the recording for good.',
+            requirePhrase: 'REMOVE'
+          });
+          if (!ok) return;
+        }
         ctx.recorder.remove(take.id);
         renderAssets(host, ctx);
       }
     })
   );
 
+  if (take.driveFile) {
+    actions.append(
+      el('button', {
+        class: 'btn btn-sm btn-danger-outline',
+        html: icons.trash,
+        title: 'Delete from Drive',
+        onclick: async () => {
+          const ok = await askDangerConfirm({
+            title: 'Delete this recording?',
+            description: 'Moves the file to Google Drive Trash. Recoverable for 30 days from drive.google.com.',
+            requirePhrase: 'DELETE'
+          });
+          if (!ok) return;
+          try {
+            await gdrive.deleteRecording(take.driveFile.id);
+            toast('Moved to Drive Trash', 'success');
+            ctx.recorder.remove(take.id);
+            renderAssets(host, ctx);
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        }
+      })
+    );
+  }
+
   return el('div', { class: 'asset' }, [preview, meta, actions]);
+}
+
+/* ------------------------------------------------------------------ *
+ * Export to MP4 / MP3 — dropdown with the two bulk options requested.
+ * ------------------------------------------------------------------ */
+
+function exportDropdown(ctx) {
+  const wrap = el('div', { class: 'dropdown' });
+  const btn = el('button', { class: 'btn btn-sm', html: icons.download }, [document.createTextNode(' Export ')]);
+  const chevron = el('span', { html: icons.chevronDown, style: 'width:13px;display:inline-flex' });
+  btn.append(chevron);
+
+  let menu = null;
+  const close = () => { if (menu) { menu.remove(); menu = null; } };
+
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (menu) return close();
+
+    menu = el('div', { class: 'dropdown-menu' }, [
+      el('button', {
+        onclick: () => { close(); runExport(ctx, 'mp4'); }
+      }, [el('span', { html: icons.download }), 'Download all MP4']),
+      el('button', {
+        onclick: () => { close(); runExport(ctx, 'mp3'); }
+      }, [el('span', { html: icons.download }), 'Download MP3 version']),
+      el('p', { class: 'hint', text: 'Converts on the server, so it counts against bandwidth — see Settings.' })
+    ]);
+    wrap.append(menu);
+  });
+
+  document.addEventListener('click', close);
+  wrap.append(btn);
+  return wrap;
+}
+
+async function runExport(ctx, format) {
+  const fileIds = ctx.recorder.takes.filter((t) => t.driveFile).map((t) => t.driveFile.id);
+  if (!fileIds.length) return toast('Nothing finished uploading yet to export.', 'error');
+
+  const { openModal } = await import('./RoomScheduler.js');
+  const progressText = el('div', { class: 'hint', text: 'Starting…' });
+
+  openModal({
+    title: format === 'mp3' ? 'Exporting MP3' : 'Exporting MP4',
+    description: 'This runs on the server and produces new files in Drive alongside the originals.',
+    body: progressText,
+    confirmLabel: 'Close',
+    onConfirm: (close) => close()
+  });
+
+  try {
+    const files = await gdrive.exportFiles(
+      { fileIds, format, folderId: ctx.project && ctx.project.folderId },
+      (percent) => { progressText.textContent = `Converting… ${percent}%`; }
+    );
+    toast(`${files.length} file${files.length === 1 ? '' : 's'} exported to Drive`, 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -153,7 +262,6 @@ async function joinDialog(host, ctx) {
     return toast(`Could not read the project folder: ${err.message}`, 'error');
   }
 
-  // Parts of one speaker's one track, in order.
   const groups = new Map();
   for (const file of files) {
     const props = file.appProperties || {};
@@ -171,8 +279,6 @@ async function joinDialog(host, ctx) {
     return toast('Nothing to join — every speaker recorded in one continuous part.', '');
   }
 
-  // Joining on the server moves the whole recording through the API host, so
-  // when it's switched off we show the editor route instead of a dead button.
   if (ctx.status && ctx.status.joinEnabled === false) {
     return openModal({
       title: 'Join these parts in your editor',
@@ -222,8 +328,7 @@ async function joinDialog(host, ctx) {
 
   openModal({
     title: 'Join parts',
-    description:
-      'Stitches each speaker’s parts into one continuous file on the server, without re-encoding. The original parts are left untouched.',
+    description: 'Stitches each speaker’s parts into one continuous file on the server, without re-encoding. The original parts are left untouched.',
     body,
     confirmLabel: 'Join selected',
     onConfirm: async (close, setBusy) => {

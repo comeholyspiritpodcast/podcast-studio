@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Studio — multitrack podcast recording</title>
+    <title>Come Holy Spirit — recording studio</title>
     <meta name="description" content="Record multitrack podcast video locally in the browser and send every track straight to your own Google Drive." />
     <meta name="color-scheme" content="dark" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Beth+Ellen&family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-    <link rel="stylesheet" href="./css/main.css" />
-    <link rel="stylesheet" href="./css/studio.css" />
+    <link rel="stylesheet" href="css/main.css" />
+    <link rel="stylesheet" href="css/studio.css" />
   </head>
   <body>
     <div id="app" class="app">
@@ -28,8 +28,9 @@
 
     <!--
       Where the API lives. Leave blank when Express serves this folder itself.
-      On GitHub Pages, set it to the Render/Railway URL:
-        window.__STUDIO_API__ = 'studio.comeholyspiritpodcast.com';
+      On GitHub Pages, set it to your Render URL — MUST include the https://
+      scheme, or the browser treats it as a relative path and doubles up
+      your own domain in the request (a bug we hit and fixed already).
     -->
     <script>
       window.__STUDIO_API__ = 'https://studio.comeholyspiritpodcast.com';

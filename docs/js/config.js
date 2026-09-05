@@ -20,14 +20,19 @@ export const UPLOAD = {
 
 export const ENDPOINTS = {
   status: '/api/status',
+  creatorLogin: '/api/creator/login',
   projects: '/api/projects',
   project: (slug) => `/api/projects/${encodeURIComponent(slug)}`,
+  deleteProject: (slug) => `/api/projects/${encodeURIComponent(slug)}`,
   recordings: (slug, folderId) =>
     `/api/projects/${encodeURIComponent(slug)}/recordings?folderId=${encodeURIComponent(folderId)}`,
+  deleteRecording: (fileId) => `/api/recordings/${encodeURIComponent(fileId)}`,
   uploadSession: '/api/uploads/session',
   uploadComplete: '/api/uploads/complete',
   join: '/api/join',
-  joinStatus: (jobId) => `/api/join/${encodeURIComponent(jobId)}`
+  joinStatus: (jobId) => `/api/join/${encodeURIComponent(jobId)}`,
+  exportStart: '/api/export',
+  exportStatus: (jobId) => `/api/export/${encodeURIComponent(jobId)}`
 };
 
 /** Preferred recording formats, best first. */
@@ -38,8 +43,23 @@ export const RECORDER_MIME_CANDIDATES = [
   'video/mp4'
 ];
 
+// echoCancellation/noiseSuppression/autoGainControl are requested as hard
+// requirements (not just "ideal"), since a browser that can't honour them
+// would otherwise silently record raw, echo-prone audio. If a device
+// genuinely can't meet them, startLocalMedia() retries with the relaxed
+// (non-exact) versions below rather than failing outright.
 export const MEDIA_CONSTRAINTS = {
   video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
+  audio: {
+    echoCancellation: { exact: true },
+    noiseSuppression: { exact: true },
+    autoGainControl: { exact: true },
+    channelCount: 1
+  }
+};
+
+export const MEDIA_CONSTRAINTS_FALLBACK = {
+  video: MEDIA_CONSTRAINTS.video,
   audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
 };
 
@@ -94,6 +114,54 @@ export const clear = (node) => {
   return node;
 };
 
+/* ---------- global upload activity (for the dashboard progress indicator) ---------- */
+
+const uploadBus = new EventTarget();
+const activeUploads = new Map(); // id -> { label, percent }
+
+export const uploads = {
+  start(id, label) {
+    activeUploads.set(id, { label, percent: 0 });
+    uploadBus.dispatchEvent(new CustomEvent('change'));
+  },
+  progress(id, percent) {
+    const entry = activeUploads.get(id);
+    if (entry) entry.percent = percent;
+    uploadBus.dispatchEvent(new CustomEvent('change'));
+  },
+  finish(id) {
+    activeUploads.delete(id);
+    uploadBus.dispatchEvent(new CustomEvent('change'));
+  },
+  list: () => [...activeUploads.values()],
+  onChange(fn) {
+    uploadBus.addEventListener('change', fn);
+    return () => uploadBus.removeEventListener('change', fn);
+  }
+};
+
+/* ---------- creator session (lightweight access-code gate) ---------- */
+
+export const creator = {
+  isSignedIn: () => localStorage.getItem('studio.creatorCode') !== null,
+  code: () => localStorage.getItem('studio.creatorCode') || '',
+  signIn(code) {
+    localStorage.setItem('studio.creatorCode', code);
+  },
+  signOut() {
+    localStorage.removeItem('studio.creatorCode');
+  }
+};
+
+/** Is this tab in the simplified guest view? Persists across the session. */
+export const guestMode = {
+  isGuest: () => sessionStorage.getItem('studio.guestView') === '1',
+  set(on) {
+    if (on) sessionStorage.setItem('studio.guestView', '1');
+    else sessionStorage.removeItem('studio.guestView');
+  }
+};
+
 export function toast(message, kind = '') {
   const root = document.getElementById('toast-root');
   const node = el('div', { class: `toast ${kind}`.trim(), text: message });
@@ -128,6 +196,84 @@ export function formatClock(ms) {
   return `${h}:${m}:${s}`;
 }
 
+/**
+ * Custom name/text entry, replacing window.prompt(). Resolves the trimmed
+ * value, or null if cancelled.
+ */
+export function askText({ title, description, placeholder = '', defaultValue = '', confirmLabel = 'Continue' }) {
+  return new Promise((resolve) => {
+    const root = document.getElementById('modal-root');
+    const input = el('input', { class: 'input', placeholder, value: defaultValue, maxlength: '60' });
+
+    const finish = (value) => {
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') finish(null);
+      if (e.key === 'Enter') finish(input.value.trim() || null);
+    };
+    document.addEventListener('keydown', onKey);
+
+    const modal = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, [
+      el('h2', { text: title }),
+      description ? el('p', { text: description }) : null,
+      el('div', { class: 'field' }, [input]),
+      el('div', { class: 'modal-actions' }, [
+        el('button', { class: 'btn btn-ghost', text: 'Cancel', onclick: () => finish(null) }),
+        el('button', { class: 'btn btn-primary', text: confirmLabel, onclick: () => finish(input.value.trim() || null) })
+      ])
+    ]);
+
+    const backdrop = el('div', { class: 'modal-backdrop', onclick: (e) => { if (e.target === backdrop) finish(null); } }, [modal]);
+    root.append(backdrop);
+    setTimeout(() => input.focus(), 30);
+  });
+}
+
+/**
+ * High-friction destructive confirmation: the person must type the exact
+ * phrase shown before the confirm button enables. Resolves true/false.
+ */
+export function askDangerConfirm({ title, description, requirePhrase, confirmLabel = 'Delete' }) {
+  return new Promise((resolve) => {
+    const root = document.getElementById('modal-root');
+    const input = el('input', { class: 'input', placeholder: requirePhrase });
+    const confirmBtn = el('button', { class: 'btn btn-danger', text: confirmLabel, disabled: true });
+
+    input.addEventListener('input', () => {
+      confirmBtn.disabled = input.value.trim() !== requirePhrase;
+    });
+
+    const finish = (value) => {
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+
+    const onKey = (e) => { if (e.key === 'Escape') finish(false); };
+    document.addEventListener('keydown', onKey);
+    confirmBtn.addEventListener('click', () => finish(true));
+
+    const modal = el('div', { class: 'modal modal-danger', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': title }, [
+      el('h2', { text: title }),
+      description ? el('p', { text: description }) : null,
+      el('p', { class: 'hint' }, [`Type `, el('strong', { text: requirePhrase }), ` to confirm.`]),
+      el('div', { class: 'field' }, [input]),
+      el('div', { class: 'modal-actions' }, [
+        el('button', { class: 'btn btn-ghost', text: 'Cancel', onclick: () => finish(false) }),
+        confirmBtn
+      ])
+    ]);
+
+    const backdrop = el('div', { class: 'modal-backdrop', onclick: (e) => { if (e.target === backdrop) finish(false); } }, [modal]);
+    root.append(backdrop);
+    setTimeout(() => input.focus(), 30);
+  });
+}
+
 export const slugify = (value) =>
   String(value).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
 
@@ -151,5 +297,10 @@ export const icons = {
   download: svg('<path d="M12 4v12"/><path d="M8 12l4 4 4-4"/><path d="M4 20h16"/>'),
   leave: svg('<path d="M15 12H4"/><path d="M8 8l-4 4 4 4"/><path d="M14 4h4a2 2 0 012 2v12a2 2 0 01-2 2h-4"/>'),
   cloud: svg('<path d="M7 18a4 4 0 01-.4-8A6 6 0 0118 9.5 3.5 3.5 0 0117.5 18z"/><path d="M12 12v5"/><path d="M9.5 14.5L12 12l2.5 2.5"/>'),
-  merge: svg('<path d="M6 4v6a4 4 0 004 4h8"/><path d="M6 20v-4"/><path d="M15 11l3 3-3 3"/>')
+  merge: svg('<path d="M6 4v6a4 4 0 004 4h8"/><path d="M6 20v-4"/><path d="M15 11l3 3-3 3"/>'),
+  trash: svg('<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>'),
+  chevronDown: svg('<path d="M6 9l6 6 6-6"/>'),
+  guest: svg('<circle cx="9" cy="8" r="3"/><path d="M4 20a5 5 0 0110 0"/><circle cx="17" cy="9" r="2.3"/><path d="M15 20a4 4 0 016.5-3"/>'),
+  key: svg('<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8"/><path d="M16 7l3 3"/><path d="M13 10l2 2"/>'),
+  edit: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>')
 };

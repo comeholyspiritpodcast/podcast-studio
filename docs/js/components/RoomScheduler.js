@@ -24,8 +24,21 @@ export async function copyInvite(slug) {
     await navigator.clipboard.writeText(url);
     toast('Invite link copied', 'success');
   } catch {
-    window.prompt('Copy this invite link', url);
+    showLinkModal(url);
   }
+}
+
+/** Fallback when the Clipboard API is unavailable — a selectable field, not window.prompt(). */
+function showLinkModal(url) {
+  const input = el('input', { class: 'input', value: url, readonly: true, onclick: (e) => e.target.select() });
+  openModal({
+    title: 'Invite link',
+    description: 'Your browser blocked automatic copying — select the text below and copy it manually.',
+    body: el('div', { class: 'field' }, [input]),
+    confirmLabel: 'Done',
+    onConfirm: (close) => close()
+  });
+  setTimeout(() => input.select(), 30);
 }
 
 /* ---------------- scheduled events view ---------------- */
@@ -166,7 +179,39 @@ export async function renderSettings(view, { status }) {
     storage,
     el('div', { class: 'asset', style: 'grid-template-columns: 1fr' }, [
       el('div', { class: 'field', style: 'margin:0' }, [el('label', { text: 'Display name' }), nameInput])
-    ])
+    ]),
+    el('div', { class: 'asset', style: 'grid-template-columns: 1fr' }, [
+      el('div', {}, [
+        el('div', { class: 'asset-name', text: 'Creator sign-in' }),
+        el('div', {
+          class: 'asset-meta',
+          text: status.creatorGateEnabled
+            ? 'A shared access code is required to sign in as Creator (CREATOR_ACCESS_CODE is set on the server).'
+            : 'No access code is set — anyone who taps "I\u2019m the Creator" gets in. Set CREATOR_ACCESS_CODE on the server to require one.'
+        })
+      ])
+    ]),
+    el('div', { class: 'asset', style: 'grid-template-columns: 1fr' }, [
+      el('div', {}, [
+        el('div', { class: 'asset-name', text: 'MP4 / MP3 export' }),
+        el('div', {
+          class: 'asset-meta',
+          text: status.exportEnabled
+            ? 'On — exporting re-encodes on the server (bandwidth cost, see README).'
+            : 'Off — recordings stay as WebM, which already plays in every modern editor and most players. Set ENABLE_SERVER_EXPORT=true on the server to turn this on.'
+        })
+      ])
+    ]),
+    el('button', {
+      class: 'btn btn-sm',
+      text: 'Sign out of Creator',
+      onclick: async () => {
+        const { creator } = await import('../config.js');
+        creator.signOut();
+        window.location.hash = '#/';
+        window.location.reload();
+      }
+    })
   );
 }
 
