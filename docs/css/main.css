@@ -455,12 +455,25 @@ a { color: inherit; }
   text-align: center;
 }
 
+.entry-brand {
+  width: min(280px, 100%);
+  margin: 0 auto 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .entry-logo {
-  max-width: 280px;
   width: 100%;
   height: auto;
-  margin: 0 auto 22px;
   display: block;
+}
+
+.entry-divider {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 16px 0 12px;
 }
 
 .entry-title { font-size: 30px; margin: 0 0 8px; font-weight: 600; }
