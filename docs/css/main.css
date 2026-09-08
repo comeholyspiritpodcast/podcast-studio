@@ -445,9 +445,14 @@ a { color: inherit; }
 
 .entry-portal {
   min-height: 100vh;
+  width: 100%;
   display: grid;
   place-items: center;
   padding: 24px;
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 10;
 }
 
 .entry-card {
