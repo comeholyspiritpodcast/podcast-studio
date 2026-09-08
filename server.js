@@ -503,7 +503,8 @@ app.delete('/api/recordings/:fileId', async (req, res) => {
 app.post('/api/uploads/session', async (req, res) => {
   try {
     const drive = ownerDrive();
-    const { projectSlug, projectName, sessionName, filename, mimeType, speaker, track, part } = req.body || {};
+    const { projectSlug, projectName, sessionName, filename, mimeType, speaker, track, part, droppedAt, rejoinedAt } =
+      req.body || {};
 
     if (!filename) return res.status(400).json({ error: 'filename_required' });
 
@@ -537,7 +538,9 @@ app.post('/api/uploads/session', async (req, res) => {
         track: String(track || 'av'),
         part: String(part || 1),
         sessionName: String(sessionName || ''),
-        recordedAt: new Date().toISOString()
+        recordedAt: new Date().toISOString(),
+        ...(droppedAt ? { droppedAt: String(droppedAt) } : {}),
+        ...(rejoinedAt ? { rejoinedAt: String(rejoinedAt) } : {})
       }
     };
 
@@ -606,6 +609,24 @@ const egress = { bytes: 0, since: new Date().toISOString() };
 
 const remainingBudget = () => Math.max(0, EGRESS_BUDGET_BYTES - egress.bytes);
 
+/**
+ * Recorded tracks can now be MP4/M4A (native browser MP4 recording) or
+ * WebM (the fallback for browsers without MP4 MediaRecorder support), so
+ * join/export can no longer assume everything is WebM. mimeType from
+ * Drive is authoritative; the stored filename's own extension is a
+ * fallback for older recordings uploaded before this existed.
+ */
+function sourceExtension(mimeType, filename) {
+  const mt = String(mimeType || '').toLowerCase();
+  if (mt.includes('mp4') || mt.includes('m4a') || mt.includes('aac')) {
+    return mt.startsWith('audio/') ? 'm4a' : 'mp4';
+  }
+  if (mt.includes('webm')) return 'webm';
+
+  const match = /\.(webm|mp4|m4a)$/i.exec(filename || '');
+  return match ? match[1].toLowerCase() : 'webm';
+}
+
 function ffmpegPath() {
   try {
     return require('ffmpeg-static');
@@ -671,7 +692,9 @@ app.post('/api/join', async (req, res) => {
 
     egress.bytes += cost;
 
-    joinParts(jobId, fileIds, String(req.body.outputName || 'joined.webm'), String(req.body.folderId || '')).catch(
+    // The extension here is just a placeholder — joinParts() overrides it
+    // to match whatever container the actual source tracks are in.
+    joinParts(jobId, fileIds, String(req.body.outputName || 'joined'), String(req.body.folderId || '')).catch(
       (err) => jobs.set(jobId, { state: 'failed', error: err.message })
     );
   } catch (err) {
@@ -762,9 +785,10 @@ async function exportFiles(jobId, fileIds, format, folderId) {
 
   try {
     for (let i = 0; i < fileIds.length; i += 1) {
-      const meta = await drive.files.get({ fileId: fileIds[i], fields: 'name' });
+      const meta = await drive.files.get({ fileId: fileIds[i], fields: 'name,mimeType' });
       const srcName = meta.data.name || `track-${i}`;
-      const srcPath = path.join(work, `src-${i}.webm`);
+      const srcExt = sourceExtension(meta.data.mimeType, srcName);
+      const srcPath = path.join(work, `src-${i}.${srcExt}`);
       const stream = await drive.files.get({ fileId: fileIds[i], alt: 'media' }, { responseType: 'stream' });
 
       await new Promise((resolve, reject) => {
@@ -772,7 +796,7 @@ async function exportFiles(jobId, fileIds, format, folderId) {
         stream.data.pipe(out).on('finish', resolve).on('error', reject);
       });
 
-      const outName = srcName.replace(/\.webm$/i, '') + (format === 'mp3' ? '.mp3' : '.mp4');
+      const outName = srcName.replace(/\.(webm|mp4|m4a)$/i, '') + (format === 'mp3' ? '.mp3' : '.mp4');
       const outPath = path.join(work, outName.replace(/[^\w.-]/g, '_'));
 
       const args =
@@ -809,9 +833,15 @@ async function joinParts(jobId, fileIds, outputName, folderId) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'join-'));
   const localPaths = [];
 
+  let partExt = 'webm';
+
   try {
     for (let i = 0; i < fileIds.length; i += 1) {
-      const target = path.join(work, `part-${String(i).padStart(3, '0')}.webm`);
+      const meta = await drive.files.get({ fileId: fileIds[i], fields: 'name,mimeType' });
+      const ext = sourceExtension(meta.data.mimeType, meta.data.name || '');
+      if (i === 0) partExt = ext === 'm4a' ? 'mp4' : ext; // concat demuxer wants a proper container, not a bare audio ext
+
+      const target = path.join(work, `part-${String(i).padStart(3, '0')}.${ext}`);
       const stream = await drive.files.get({ fileId: fileIds[i], alt: 'media' }, { responseType: 'stream' });
 
       await new Promise((resolve, reject) => {
@@ -826,7 +856,12 @@ async function joinParts(jobId, fileIds, outputName, folderId) {
     const listFile = path.join(work, 'parts.txt');
     fs.writeFileSync(listFile, localPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
 
-    const outPath = path.join(work, outputName.replace(/[^\w.-]/g, '_'));
+    // ffmpeg -c copy remuxes without re-encoding, but the container has to
+    // match what the streams actually are (H.264/AAC needs .mp4, VP9/Opus
+    // needs .webm) — so the mux target's extension always follows partExt,
+    // regardless of what extension the caller asked for.
+    const safeName = outputName.replace(/[^\w.-]/g, '_').replace(/\.(webm|mp4|m4a)$/i, '') || 'joined';
+    const outPath = path.join(work, `${safeName}.${partExt}`);
 
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath(), ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', outPath]);
@@ -842,11 +877,11 @@ async function joinParts(jobId, fileIds, outputName, folderId) {
 
     const created = await drive.files.create({
       requestBody: {
-        name: outputName,
+        name: `${safeName}.${partExt}`,
         parents: folderId ? [folderId] : undefined,
         appProperties: { joinedFrom: fileIds.join(',') }
       },
-      media: { mimeType: 'video/webm', body: fs.createReadStream(outPath) },
+      media: { mimeType: partExt === 'mp4' ? 'video/mp4' : 'video/webm', body: fs.createReadStream(outPath) },
       fields: 'id,name,size,webViewLink,webContentLink'
     });
 

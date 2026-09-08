@@ -95,7 +95,9 @@ export async function renderStudio(view, { slug, status }) {
     );
   }
 
-  headerButtons.push(el('a', { class: 'btn btn-sm btn-ghost', href: '#/', html: icons.leave, title: 'Leave room' }));
+  headerButtons.push(
+    el('a', { class: 'btn btn-sm btn-ghost', href: isGuest ? '#/guest' : '#/host', html: icons.leave, title: 'Leave room' })
+  );
 
   view.append(
     el('div', { class: 'studio-head' }, [
@@ -489,7 +491,7 @@ async function showPreJoin(view, { roomLabel, isGuest }) {
           ]),
           echoHint,
           joinBtn,
-          isGuest ? null : el('a', { class: 'btn btn-ghost btn-sm', href: '#/', text: 'Cancel', style: 'margin-top:8px;display:block;text-align:center' })
+          isGuest ? null : el('a', { class: 'btn btn-ghost btn-sm', href: '#/host', text: 'Cancel', style: 'margin-top:8px;display:block;text-align:center' })
         ])
       ])
     ])

@@ -35,12 +35,34 @@ export const ENDPOINTS = {
   exportStatus: (jobId) => `/api/export/${encodeURIComponent(jobId)}`
 };
 
-/** Preferred recording formats, best first. */
+/**
+ * Preferred recording formats, best first.
+ *
+ * MP4/H.264+AAC is tried first: Safari has supported it for years, and
+ * current Chrome/Edge do too. Recording straight to MP4 means most guests'
+ * takes never need a server-side transcode at all — no ffmpeg pass, no
+ * extra Drive round-trip. Browsers that can't do MP4 (older Firefox, some
+ * Android WebViews) fall through to WebM, which still works everywhere and
+ * still plays fine in editors and browsers.
+ */
 export const RECORDER_MIME_CANDIDATES = [
+  'video/mp4;codecs=h264,aac',
+  'video/mp4;codecs=avc1,mp4a',
+  'video/mp4',
   'video/webm;codecs=vp9,opus',
   'video/webm;codecs=vp8,opus',
-  'video/webm',
-  'video/mp4'
+  'video/webm'
+];
+
+/**
+ * Preferred audio-only formats, best first. Same MP4-first logic as above,
+ * applied to the audio-only recorder track.
+ */
+export const RECORDER_AUDIO_MIME_CANDIDATES = [
+  'audio/mp4;codecs=aac',
+  'audio/mp4',
+  'audio/webm;codecs=opus',
+  'audio/webm'
 ];
 
 // echoCancellation/noiseSuppression/autoGainControl are requested as hard

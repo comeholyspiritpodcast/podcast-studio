@@ -11,17 +11,21 @@
  * preview the take and download it without waiting on Drive.
  *
  * Part numbering: if someone drops out and rejoins, their next take in the
- * same room is written as part 2, 3, ... of the same session name, which the
- * Join parts action later stitches together.
+ * same room is written as part 2, 3, ... of the same session name. Parts are
+ * never merged automatically — each stays a separate file in Drive, the
+ * way Riverside leaves dropout segments as separate tracks rather than
+ * silently stitching them. Every part after the first carries a droppedAt
+ * (when the previous part ended) and rejoinedAt (when this part started)
+ * timestamp, so the gap is visible on the take itself rather than hidden.
+ * A manual "Join parts" action is still available for someone who wants a
+ * single stitched file, but nothing runs unless they ask for it.
  */
 
-import { RECORDER_MIME_CANDIDATES } from '../config.js';
+import { RECORDER_MIME_CANDIDATES, RECORDER_AUDIO_MIME_CANDIDATES } from '../config.js';
 import { LiveUploader } from './uploaderService.js';
 
 export function pickMimeType(audioOnly = false) {
-  const candidates = audioOnly
-    ? ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
-    : RECORDER_MIME_CANDIDATES;
+  const candidates = audioOnly ? RECORDER_AUDIO_MIME_CANDIDATES : RECORDER_MIME_CANDIDATES;
 
   for (const type of candidates) {
     if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
@@ -29,13 +33,24 @@ export function pickMimeType(audioOnly = false) {
   return '';
 }
 
-const partKey = (sessionName) => `studio.part.${sessionName}`;
+const partKey = (key) => `studio.part.${key}`;
+const lastStopKey = (key) => `studio.lastStop.${key}`;
 
 /** Survives a reload, so a rejoin picks up at the next part number. */
-function nextPart(sessionName) {
-  const current = Number(localStorage.getItem(partKey(sessionName)) || 0) + 1;
-  localStorage.setItem(partKey(sessionName), String(current));
+function nextPart(key) {
+  const current = Number(localStorage.getItem(partKey(key)) || 0) + 1;
+  localStorage.setItem(partKey(key), String(current));
   return current;
+}
+
+/** When this speaker's previous part in this session stopped, if any. */
+function lastStop(key) {
+  const raw = localStorage.getItem(lastStopKey(key));
+  return raw ? Number(raw) : null;
+}
+
+function recordStop(key, at) {
+  localStorage.setItem(lastStopKey(key), String(at));
 }
 
 export class RecorderService extends EventTarget {
@@ -69,16 +84,28 @@ export class RecorderService extends EventTarget {
     this.sessionId = options.sessionId || `take-${Date.now()}`;
     this.speaker = (options.speaker || 'me').replace(/\s+/g, '_');
     this.sessionName = options.sessionName || this.sessionId;
+
+    const speakerKey = `${this.sessionName}.${this.speaker}`;
+    this.part = nextPart(speakerKey);
+    this.startedAt = Date.now();
+
+    // A rejoin (part > 1) carries the gap with it: droppedAt is when this
+    // speaker's previous part stopped, rejoinedAt is right now. Both travel
+    // through to Drive as appProperties so the gap is visible on the file
+    // itself, not just inferred from part numbers.
+    this.droppedAt = this.part > 1 ? lastStop(speakerKey) : null;
+    this.rejoinedAt = this.part > 1 ? this.startedAt : null;
+
     this.target = {
       projectSlug: options.projectSlug,
       projectName: options.projectName,
       sessionName: this.sessionName,
-      speaker: this.speaker
+      speaker: this.speaker,
+      droppedAt: this.droppedAt ? new Date(this.droppedAt).toISOString() : '',
+      rejoinedAt: this.rejoinedAt ? new Date(this.rejoinedAt).toISOString() : ''
     };
     this.liveUpload = options.liveUpload !== false;
-    this.part = nextPart(`${this.sessionName}.${this.speaker}`);
 
-    this.startedAt = Date.now();
     this.chunks.clear();
     this.uploaders.clear();
     this.recorders = [];
@@ -180,7 +207,8 @@ export class RecorderService extends EventTarget {
       )
     );
 
-    const duration = Date.now() - this.startedAt;
+    const stoppedAt = Date.now();
+    const duration = stoppedAt - this.startedAt;
     const fresh = [];
 
     for (const spec of this.recorders) {
@@ -197,6 +225,8 @@ export class RecorderService extends EventTarget {
         part: this.part,
         track: spec.track,
         speaker: this.speaker,
+        droppedAt: this.droppedAt,
+        rejoinedAt: this.rejoinedAt,
         blob,
         url: URL.createObjectURL(blob),
         filename: spec.filename,
@@ -208,6 +238,10 @@ export class RecorderService extends EventTarget {
         driveFile: null
       });
     }
+
+    // Remember when this speaker stopped, so if they rejoin later the next
+    // part can report the actual drop-out gap.
+    recordStop(`${this.sessionName}.${this.speaker}`, stoppedAt);
 
     this.takes = this.takes.concat(fresh);
     this.chunks.clear();

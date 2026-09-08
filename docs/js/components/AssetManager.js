@@ -12,6 +12,48 @@
 import { el, clear, icons, toast, formatBytes, formatClock, askDangerConfirm } from '../config.js';
 import { gdrive } from '../services/gdriveService.js';
 
+/** "3:41 PM" style clock time, for marking when a drop-out happened. */
+function clockTime(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+}
+
+/** Human gap between two timestamps, e.g. "2m 14s". */
+function gapBetween(from, to) {
+  if (!from || !to) return null;
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return m ? `${m}m ${s}s` : `${s}s`;
+}
+
+/**
+ * Builds the "dropped out … rejoined …" badge for a part that followed a
+ * disconnect. Returns null for part 1, or if the timestamps aren't present
+ * (e.g. an older recording made before this was tracked).
+ */
+function dropoutBadge(take) {
+  if (!take.droppedAt || !take.rejoinedAt) return null;
+
+  const droppedClock = clockTime(take.droppedAt);
+  const rejoinedClock = clockTime(take.rejoinedAt);
+  const gap = gapBetween(take.droppedAt, take.rejoinedAt);
+  if (!droppedClock || !rejoinedClock) return null;
+
+  const label = gap
+    ? `Dropped out at ${droppedClock} · rejoined at ${rejoinedClock} · gap ${gap}`
+    : `Dropped out at ${droppedClock} · rejoined at ${rejoinedClock}`;
+
+  return el('div', { class: 'asset-meta dropout-badge', title: label }, [
+    el('span', { html: icons.link, style: 'width:13px;display:inline-flex' }),
+    label
+  ]);
+}
+
 export function renderAssets(host, ctx) {
   clear(host);
 
@@ -70,12 +112,15 @@ function assetRow(take, ctx, host) {
   const progress = el('div', { class: 'progress' }, [progressFill]);
   const status = el('div', { class: 'asset-meta' });
 
+  const badge = dropoutBadge(take);
+
   const meta = el('div', {}, [
     el('div', { class: 'asset-name', text: take.filename }),
     el('div', {
       class: 'asset-meta',
       text: `${isAudio ? 'Audio only' : 'Video + audio'} · part ${take.part} · ${formatBytes(take.size)} · ${formatClock(take.duration)}`
     }),
+    badge,
     status,
     progress
   ]);
@@ -289,7 +334,14 @@ async function joinDialog(host, ctx) {
           const [speaker, track] = key.split('|');
           return el('div', { class: 'field' }, [
             el('label', { text: `${speaker} — ${track}`, style: 'color:var(--text)' }),
-            el('div', { class: 'hint', text: list.map((f) => f.name).join('  →  ') })
+            el('div', { class: 'hint', text: list.map((f) => f.name).join('  →  ') }),
+            ...list
+              .map((f) => {
+                const props = f.appProperties || {};
+                const badge = dropoutBadge({ droppedAt: props.droppedAt, rejoinedAt: props.rejoinedAt });
+                return badge ? el('div', { class: 'hint' }, [`Part ${props.part}: `, badge]) : null;
+              })
+              .filter(Boolean)
           ]);
         }),
         el('p', {
@@ -318,7 +370,14 @@ async function joinDialog(host, ctx) {
           input,
           `${speaker} — ${track} · ${list.length} parts`
         ]),
-        el('div', { class: 'hint', text: list.map((f) => f.name).join('  →  ') })
+        el('div', { class: 'hint', text: list.map((f) => f.name).join('  →  ') }),
+        ...list
+          .map((f) => {
+            const props = f.appProperties || {};
+            const badge = dropoutBadge({ droppedAt: props.droppedAt, rejoinedAt: props.rejoinedAt });
+            return badge ? el('div', { class: 'hint' }, [`Part ${props.part}: `, badge]) : null;
+          })
+          .filter(Boolean)
       ])
     );
   }

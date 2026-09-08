@@ -14,7 +14,7 @@ const NAV = [
 export function renderNavbar({ status }) {
   const bar = clear(document.getElementById('navbar'));
 
-  const brand = el('a', { class: 'brand', href: '#/' }, [
+  const brand = el('a', { class: 'brand', href: '#/host' }, [
     el('div', { class: 'brand-stacked' }, [
       el('span', { class: 'brand-script', text: 'Come Holy Spirit' }),
       el('span', { class: 'brand-sans', text: 'Podcast' })

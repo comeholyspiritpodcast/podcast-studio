@@ -441,6 +441,42 @@ a { color: inherit; }
 .dropdown-menu button svg { width: 15px; flex: none; }
 .dropdown-menu .hint { padding: 8px 11px 4px; margin: 0; }
 
+/* ---------- footer quote bar ---------- */
+
+.app-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 20px 14px;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.app-footer.visible { opacity: 1; }
+
+.footer-quote {
+  font-family: 'Lexend', sans-serif;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted);
+  max-width: 560px;
+}
+
+.footer-attribution {
+  font-family: 'Beth Ellen', cursive;
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--muted);
+}
+
 /* ---------- entry portal ---------- */
 
 .entry-portal {
@@ -502,11 +538,20 @@ a { color: inherit; }
   text-align: left;
   cursor: pointer;
   color: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .entry-choice:hover { border-color: #3a3a40; }
-.entry-choice svg { width: 26px; margin-bottom: 14px; color: var(--muted); }
-.entry-choice h3 { margin: 0 0 6px; font-size: 19px; }
+.entry-choice svg { width: 26px; height: 26px; margin-bottom: 14px; color: var(--muted); flex: none; }
+.entry-choice h3 {
+  margin: 0 0 6px;
+  font-size: 19px;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
 .entry-choice p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
 
 /* ---------- guest-simplified room ---------- */
