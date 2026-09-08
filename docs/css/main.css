@@ -63,6 +63,14 @@ h1, h2, h3, h4,
   text-decoration: none;
 }
 
+.brand-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  align-self: center;
+  flex: none;
+}
+
 .brand-sans { font-family: var(--font-body); font-weight: 600; font-size: 0.62em; color: var(--muted); }
 
 a { color: inherit; }
