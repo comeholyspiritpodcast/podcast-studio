@@ -19,7 +19,8 @@ export function renderNavbar({ status }) {
       el('span', { class: 'brand-script', text: 'Come Holy Spirit' }),
       el('span', { class: 'brand-sans', text: 'Podcast' })
     ]),
-    el('span', { class: 'brand-studio', text: '| Studio' })
+    el('span', { class: 'brand-divider', text: '|' }),
+    el('span', { class: 'brand-studio', text: 'Studio' })
   ]);
 
   // Removed topbar-title element so tab names do not render in the header

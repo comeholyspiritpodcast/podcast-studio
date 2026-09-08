@@ -7,7 +7,7 @@
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   text-decoration: none;
   color: inherit;
 }
@@ -15,19 +15,34 @@
 .brand-stacked {
   display: inline-flex;
   flex-direction: column;
-  line-height: 1.05;
+  align-items: center;
+  text-align: center;
+  line-height: 1.1;
+  margin-bottom: 3px;
 }
 
 .brand-script {
-  font-size: 15px;
+  font-size: 13.5px;
   font-weight: 600;
 }
 
 .brand-sans {
-  font-size: 12px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
+  letter-spacing: 0.08em;
+  color: #ffffff;
+  margin-top: 2px;
+}
+
+.brand-divider {
+  display: inline-flex;
+  align-items: center;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 300;
+  line-height: 28px;
+  height: 28px;
+  opacity: 0.8;
 }
 
 .brand-studio {
