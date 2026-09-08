@@ -457,14 +457,24 @@ a { color: inherit; }
   text-align: center;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.25s ease, left 0.25s ease;
 }
 
 .app-footer.visible { opacity: 1; }
 
+/* On the host's dashboard, the sidebar occupies the left column, so center
+   the quote within the remaining (right) module instead of the full page. */
+.app-footer.offset-sidebar { left: var(--sidebar-w); }
+
+@media (max-width: 620px) {
+  /* Sidebar collapses to a top row on narrow screens (see .app breakpoint
+     above) — the offset no longer applies to a side column. */
+  .app-footer.offset-sidebar { left: 0; }
+}
+
 .footer-quote {
   font-family: 'Lexend', sans-serif;
-  font-size: 12.5px;
+  font-size: 15px;
   font-weight: 400;
   color: var(--muted);
   max-width: 560px;
@@ -472,7 +482,7 @@ a { color: inherit; }
 
 .footer-attribution {
   font-family: 'Beth Ellen', cursive;
-  font-size: 22px;
+  font-size: 17px;
   line-height: 1.1;
   color: var(--muted);
 }

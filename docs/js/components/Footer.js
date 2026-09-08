@@ -9,6 +9,11 @@
  *
  * Neither shows on the neutral entry-portal split, since nobody has picked
  * a side yet there. setFooterAudience(null) hides it entirely.
+ *
+ * withSidebar: true centers the quote within the right-hand module (past
+ * the sidebar) instead of the full viewport width — used for the host's
+ * normal dashboard, where the sidebar is visible. Screens with no sidebar
+ * (sign-in cards, the guest landing) leave this false.
  */
 
 const QUOTES = {
@@ -22,13 +27,13 @@ const QUOTES = {
   }
 };
 
-export function setFooterAudience(audience) {
+export function setFooterAudience(audience, { withSidebar = false } = {}) {
   const node = document.getElementById('app-footer');
   if (!node) return;
 
   const copy = QUOTES[audience];
   if (!copy) {
-    node.classList.remove('visible');
+    node.classList.remove('visible', 'offset-sidebar');
     node.innerHTML = '';
     return;
   }
@@ -44,4 +49,5 @@ export function setFooterAudience(audience) {
 
   node.append(quote, attribution);
   node.classList.add('visible');
+  node.classList.toggle('offset-sidebar', withSidebar);
 }

@@ -86,8 +86,9 @@ async function route() {
 
   if (isRoomRoute) {
     const slug = decodeURIComponent(path.slice('/room/'.length)).replace(/\/+$/, '');
-    setFooterAudience(guestMode.isGuest() ? 'guest' : 'host');
-    renderNavbar({ title: guestMode.isGuest() ? '' : 'Studio', status });
+    const isGuest = guestMode.isGuest();
+    setFooterAudience(isGuest ? 'guest' : 'host', { withSidebar: !isGuest });
+    renderNavbar({ title: isGuest ? '' : 'Studio', status });
     renderSidebar({ route: '/', status });
     await renderStudio(view, { slug, status });
     return;
@@ -104,9 +105,7 @@ async function route() {
     return;
   }
 
-  setFooterAudience('host');
-
-  // /host is the host's home — alias it to the library, same as "/".
+  setFooterAudience('host', { withSidebar: true });
   const effectivePath = path === '/host' ? '/' : path;
 
   if (effectivePath === '/scheduled') {
