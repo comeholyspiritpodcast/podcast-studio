@@ -36,10 +36,8 @@ export async function renderEntryPortal(view) {
     el('div', { class: 'entry-portal' }, [
       el('div', { class: 'entry-card' }, [
         logo,
-        el('h1', { class: 'entry-title' }, [
-          el('span', { class: 'script-name', text: 'Come Holy Spirit' }),
-          ' Studio'
-        ]),
+        el('hr', { class: 'entry-divider' }),
+        el('h1', { class: 'entry-title', text: 'STUDIO' }),
         el('p', { class: 'entry-sub', text: 'Choose how you are joining today.' }),
         el('div', { class: 'entry-choices' }, [
           el(
